@@ -48,8 +48,8 @@ fn main() {
         let header_length: usize = ihl as usize * 4;
 
         let dscp_and_ecn = ip_packet[1];
-        let dscp = dscp_and_ecn >> 2;
-        let ecn = dscp_and_ecn & 0x03;
+        let _dscp = dscp_and_ecn >> 2;
+        let _ecn = dscp_and_ecn & 0x03;
 
         let total_length = u16::from_be_bytes([ip_packet[2], ip_packet[3]]) as usize;
 

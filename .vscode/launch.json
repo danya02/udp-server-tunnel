@@ -7,15 +7,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'udp-server-tunnel'",
+            "name": "Debug executable 'tunnel-server-side'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=udp-server-tunnel",
+                    "--bin=tunnel-server-side",
                     "--package=udp-server-tunnel"
                 ],
                 "filter": {
-                    "name": "udp-server-tunnel",
+                    "name": "tunnel-server-side",
                     "kind": "bin"
                 }
             },
@@ -25,16 +25,53 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'udp-server-tunnel'",
+            "name": "Debug unit tests in executable 'tunnel-server-side'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=udp-server-tunnel",
+                    "--bin=tunnel-server-side",
                     "--package=udp-server-tunnel"
                 ],
                 "filter": {
-                    "name": "udp-server-tunnel",
+                    "name": "tunnel-server-side",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'tunnel-client-side'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=tunnel-client-side",
+                    "--package=udp-server-tunnel"
+                ],
+                "filter": {
+                    "name": "tunnel-client-side",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'tunnel-client-side'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=tunnel-client-side",
+                    "--package=udp-server-tunnel"
+                ],
+                "filter": {
+                    "name": "tunnel-client-side",
                     "kind": "bin"
                 }
             },

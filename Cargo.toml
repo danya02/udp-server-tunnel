@@ -5,5 +5,14 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "tunnel-server-side"
+path = "src/server.rs"
+
+[[bin]]
+name = "tunnel-client-side"
+path = "src/client.rs"
+
 [dependencies]
 tun-tap = "0.1.2"
+tokio = { version = "1", features = ["full"] }
