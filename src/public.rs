@@ -121,8 +121,9 @@ impl ClientDatabase {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let target: std::net::SocketAddr = "127.0.0.1:12345".parse().unwrap();
-    println!("Waiting to connect to {}...", target);
-    let tcp_stream = TcpStream::connect(target).await?;
+    let listener = TcpListener::bind(&target).await?;
+    println!("Waiting for connection bound to {}...", target);
+    let (tcp_stream, remote_addr) = listener.accept().await?;
     println!("Connected to server at {}", tcp_stream.peer_addr()?);
     let (read_half, write_half) = tcp_stream.into_split();
 
@@ -169,6 +170,7 @@ async fn recv_udp_send_tcp(
             maybe_client_index = database.get_client_by_addr(peer);
         }
         if let Some(client_index) = maybe_client_index {
+            let client_index = client_index+1;  // The first IP address in a range is not routable.
             println!("That corresponds to client {}", client_index);
             let client_index: u32 = client_index.try_into().unwrap();
             let client_index_bytes = client_index.to_be_bytes();
@@ -224,7 +226,7 @@ async fn recv_tcp_send_udp(
                     continue;
                 }
                 let client_index = u32::from_be_bytes(buf[..4].try_into().unwrap());
-                let client_index = client_index as usize;
+                let client_index = (client_index-1) as usize;  // The first IP address in a range is not routable, and we incremented the IP address up top.
                 println!("That corresponds to client {}", client_index);
                 let maybe_addr;
                 {

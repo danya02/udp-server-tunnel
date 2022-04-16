@@ -14,5 +14,6 @@ name = "tunnel-local-side"
 path = "src/local.rs"
 
 [dependencies]
-tun-tap = "0.1.2"
 tokio = { version = "1.17", features = ["full"] }
+tokio-tun = "0.5.1"
+packet = "0.1.4"
