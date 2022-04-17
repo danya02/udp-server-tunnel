@@ -127,15 +127,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Connected to server at {}", tcp_stream.peer_addr()?);
     let (read_half, write_half) = tcp_stream.into_split();
 
-    let send_socket = UdpSocket::bind("127.0.0.1:0").await?; // This socket will be used for sending, so we don't care about listening to it.
     let recv_socket = UdpSocket::bind("0.0.0.0:34197").await?; // This socket is used to receive data from the world.
+    // We do not create a send socket; we will create one when we need to send data to the world.
 
     let client_database = ClientDatabase::new(256);
     let client_database_lock = Arc::new(Mutex::new(client_database));
     let client_database_lock_clone = client_database_lock.clone();
 
     let t2u =
-        spawn(async move { recv_tcp_send_udp(read_half, send_socket, client_database_lock).await });
+        spawn(async move { recv_tcp_send_udp(read_half, client_database_lock).await });
 
     let _u2t = spawn(async move {
         recv_udp_send_tcp(recv_socket, write_half, client_database_lock_clone).await
@@ -201,14 +201,13 @@ async fn recv_udp_send_tcp(
 
 async fn recv_tcp_send_udp(
     read_half: tokio::net::tcp::OwnedReadHalf,
-    writer: UdpSocket,
     database: Arc<Mutex<ClientDatabase>>,
 ) {
     let mut buf = [0u8; 65536];
 
     println!(
-        "Spawned recv_tcp_send_udp with read_half={:?} and writer={:?}",
-        read_half, writer
+        "Spawned recv_tcp_send_udp with read_half={:?}",
+        read_half
     );
     loop {
         read_half.readable().await.unwrap();
@@ -237,7 +236,8 @@ async fn recv_tcp_send_udp(
                 
                 if let Some(addr) = maybe_addr {
                     println!("Sending to {}", addr);
-                    writer.send_to(&buf[4..n], addr).await.unwrap();
+                    let writer = UdpSocket::bind(addr).await.unwrap();
+                    writer.send_to(&buf[4..n], addr).await.unwrap();  // FIXME: thread 'tokio-runtime-worker' panicked at 'called `Result::unwrap()` on an `Err` value: Os { code: 22, kind: InvalidInput, message: "Invalid argument" }', src/public.rs:240:60
                 } else {
                     println!("That client is not in the database");
                 }
