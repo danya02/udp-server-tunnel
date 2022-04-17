@@ -120,25 +120,28 @@ impl ClientDatabase {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let target: std::net::SocketAddr = "127.0.0.1:12345".parse().unwrap();
+    let target: std::net::SocketAddr = "0.0.0.0:12345".parse().unwrap();
     let listener = TcpListener::bind(&target).await?;
     println!("Waiting for connection bound to {}...", target);
-    let (tcp_stream, remote_addr) = listener.accept().await?;
+    let (tcp_stream, _remote_addr) = listener.accept().await?;
     println!("Connected to server at {}", tcp_stream.peer_addr()?);
     let (read_half, write_half) = tcp_stream.into_split();
 
-    let recv_socket = UdpSocket::bind("0.0.0.0:34197").await?; // This socket is used to receive data from the world.
-    // We do not create a send socket; we will create one when we need to send data to the world.
+    let recv_socket = UdpSocket::bind("0.0.0.0:34197").await?; // This socket is used both to receive and send packets.
 
     let client_database = ClientDatabase::new(256);
     let client_database_lock = Arc::new(Mutex::new(client_database));
     let client_database_lock_clone = client_database_lock.clone();
 
-    let t2u =
-        spawn(async move { recv_tcp_send_udp(read_half, client_database_lock).await });
+    let recv_socket_mutex = Arc::new(tokio::sync::Mutex::new(recv_socket)); // Because this socket is used by multiple threads, we need to wrap it in a Mutex,
+                                                                            // and it's easier to use the expensive async Mutex here.
+    let recv_socket_mutex_clone = recv_socket_mutex.clone();
 
-    let _u2t = spawn(async move {
-        recv_udp_send_tcp(recv_socket, write_half, client_database_lock_clone).await
+    let t2u =
+        spawn(async { recv_tcp_send_udp(read_half, recv_socket_mutex, client_database_lock).await });
+
+    let _u2t = spawn(async{
+        recv_udp_send_tcp(recv_socket_mutex_clone, write_half, client_database_lock_clone).await
     });
 
     // When the TCP connection is closed, only the recv_tcp task will detect it.
@@ -148,9 +151,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // Wire format: the first 4 bytes of every packet sent over TCP are the client's ID, in big-endian format; the rest of the packet is the UDP data.
-
 async fn recv_udp_send_tcp(
-    reader: UdpSocket,
+    reader: Arc<tokio::sync::Mutex<UdpSocket>>,
     write_half: tokio::net::tcp::OwnedWriteHalf,
     database: Arc<Mutex<ClientDatabase>>,
 ) {
@@ -160,7 +162,14 @@ async fn recv_udp_send_tcp(
         reader, write_half
     );
     loop {
-        let (size, peer) = reader.recv_from(&mut buf).await.unwrap();
+        let size;
+        let peer;
+        {
+            let held_reader = reader.lock().await;
+            let (n, addr) = held_reader.recv_from(&mut buf).await.unwrap();
+            size = n;
+            peer = addr;
+        }
         println!("Received {} bytes from {}", size, peer);
 
         let maybe_client_index;
@@ -201,13 +210,14 @@ async fn recv_udp_send_tcp(
 
 async fn recv_tcp_send_udp(
     read_half: tokio::net::tcp::OwnedReadHalf,
+    writer: Arc<tokio::sync::Mutex<UdpSocket>>,
     database: Arc<Mutex<ClientDatabase>>,
 ) {
     let mut buf = [0u8; 65536];
 
     println!(
-        "Spawned recv_tcp_send_udp with read_half={:?}",
-        read_half
+        "Spawned recv_tcp_send_udp with read_half={:?} and writer={:?}",
+        read_half, writer
     );
     loop {
         read_half.readable().await.unwrap();
@@ -236,8 +246,9 @@ async fn recv_tcp_send_udp(
                 
                 if let Some(addr) = maybe_addr {
                     println!("Sending to {}", addr);
-                    let writer = UdpSocket::bind(addr).await.unwrap();
-                    writer.send_to(&buf[4..n], addr).await.unwrap();  // FIXME: thread 'tokio-runtime-worker' panicked at 'called `Result::unwrap()` on an `Err` value: Os { code: 22, kind: InvalidInput, message: "Invalid argument" }', src/public.rs:240:60
+                    //let writer = UdpSocket::connect(addr).await.unwrap();
+                    let held_writer = writer.lock().await;
+                    held_writer.send_to(&buf[4..n], addr).await.unwrap();  // FIXME: thread 'tokio-runtime-worker' panicked at 'called `Result::unwrap()` on an `Err` value: Os { code: 22, kind: InvalidInput, message: "Invalid argument" }', src/public.rs:240:60
                 } else {
                     println!("That client is not in the database");
                 }
