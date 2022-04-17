@@ -1,5 +1,4 @@
 use packet::Builder;
-use packet::Packet;
 use std::net::Ipv4Addr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -92,7 +91,7 @@ async fn main() {
     println!("Hello, world!");
 
     // Connect to the public side via TCP.
-    let addr = "127.0.0.1:12345";
+    let addr = "127.0.0.1:12345";  // TODO: Make this configurable.
     let stream = TcpStream::connect(addr)
         .await
         .expect("Could not connect to server");
@@ -130,9 +129,11 @@ async fn recv_tun_send_tcp(
                 continue;
             }
         }
-        println!("Read {} bytes from TUN: {:x?}", n, &buf[..n]);
 
-        println!("Received {} bytes:", n);
+        let buf = &buf[..n];
+        println!("Read {} bytes from TUN", n);
+
+
         // The first two bytes are the flags, and the next two are the EtherType of the protocol:
         // https://en.wikipedia.org/wiki/EtherType
         // The expected EtherType is 0x0800 (0x00 0x08) for IPv4; IPv6 is hard so we'll ignore it for now.
@@ -142,9 +143,28 @@ async fn recv_tun_send_tcp(
         }
 
         // The remaining bytes are the IPv4 packet.
-        let ip_buf = &buf[4..=n];
+        let ip_buf = &buf[4..];
         let ip_packet = packet::ip::v4::Packet::new(ip_buf).expect("Could not parse IPv4 packet");
-        println!("Data: {:x?}", ip_packet.payload());
+        // ip_packet.payload is not the actual application data; the application data is after the header.
+        let udp_packet = &ip_buf[(ip_packet.header() as usize * 4)..];
+        println!("IP packet payload (UDP packet): {} bytes", udp_packet.len());
+
+        // The UDP packet has a 8-byte header: source port, destination port, length, checksum, each as a u16.
+
+        let _source_port = u16::from_be_bytes([udp_packet[0], udp_packet[1]]);
+        let dest_port = u16::from_be_bytes([udp_packet[2], udp_packet[3]]);
+        let length = u16::from_be_bytes([udp_packet[4], udp_packet[5]]);
+        let _checksum = u16::from_be_bytes([udp_packet[6], udp_packet[7]]);
+        let payload = &udp_packet[8..];
+
+        if dest_port != 10000 {
+            // The virtual client has sent their request over port 10000, and if the reply isn't sent back to the same port, it will be lost.
+            // The server shouldn't be doing this, so we ignore the packet.
+            println!("Destination port {} is not 10000, ignoring", dest_port);
+            continue;
+        }
+        println!("UDP packet payload: {} (header says {}) bytes {:x?}", payload.len(), length-8, payload);
+
 
         // The virtual client sent a request using a virtual IP, and the server replied with that virtual IP as the destination.
         let virtual_client_ip: u32 = ip_packet.destination().into();
@@ -158,9 +178,11 @@ async fn recv_tun_send_tcp(
             );
             continue;
         }
-        let mut tcp_buf = Vec::with_capacity(ip_packet.payload().len() + 4);
+
+
+        let mut tcp_buf = Vec::with_capacity(payload.len() + 4);
         tcp_buf.extend_from_slice(&virtual_client_index.to_be_bytes());
-        tcp_buf.extend_from_slice(&ip_packet.payload());
+        tcp_buf.extend_from_slice(&payload);
 
         println!("Sending {} bytes over TCP", tcp_buf.len());
         match write_half.writable().await {
@@ -209,8 +231,9 @@ async fn recv_tcp_send_tun(
             }
         }
 
-        println!("Received {} bytes:", n);
-        println!("Data: {:x?}", &buf[0..n]);
+        let buf = &buf[..n];
+        println!("Received {} bytes from TCP:", n);
+        println!("Data: {:x?}", &buf);
 
         // The first 4 bytes are the virtual client ID, which we will convert to an IP address.
         let virtual_client_id = u32::from_be_bytes(buf[0..4].try_into().unwrap());
@@ -229,13 +252,14 @@ async fn recv_tcp_send_tun(
             }
         }
 
-        let payload = &buf[4..n];
+        let payload = &buf[4..];
+        println!("Received payload: {} bytes {:x?}", payload.len(), payload);
 
         // Now we have the virtual client IP, we can construct the IP packet.
         let packet_buf = packet::ip::v4::Builder::default()
             .source(virtual_ip).unwrap()
             .ttl(8).unwrap()  // Don't let this packet get too far into the network.
-            .destination(Ipv4Addr::new(10, 0, 0, 128)).unwrap() // TODO: this must be the IP address of the server
+            .destination(Ipv4Addr::new(172,20,50,146)).unwrap() // TODO: this must be the IP address of the server
             //.payload(payload).unwrap()
             .protocol(packet::ip::Protocol::Udp).unwrap()
             .udp().unwrap()
@@ -244,28 +268,6 @@ async fn recv_tcp_send_tun(
                 .payload(payload).unwrap()
                 .build().unwrap();
 
-
-        //let packet_buf: Vec<u8> = packet.into();
-
-        /*
-        // The builder does not allow setting the packet's payload, so we have to do it manually.
-        // First, we edit the packet's length field to include the payload length.
-        // Then, we append the payload to the end of the packet.
-        // Finally, we create a new Packet struct to recalculate the header checksum.
-        let mut packet_raw: Vec<u8> = packet.into();
-        // The length of the packet is stored in bytes 2 and 3.
-        let header_len = u16::from_be_bytes(packet_raw[2..=3].try_into().unwrap());
-        let payload_len = payload.len();
-        let new_len = header_len + (payload_len as u16);
-        let new_len = new_len.to_be_bytes();
-        packet_raw[2..=3].copy_from_slice(&new_len);
-        // Appending the payload to the end of the packet.
-        packet_raw.extend_from_slice(payload);
-        // Creating a new Packet struct with the new data
-        let mut new_packet = packet::ip::v4::Packet::unchecked(&mut packet_raw);
-        // Recalculating the header checksum.
-        new_packet.update_checksum().unwrap();
-        */
 
         // Now we have the IP packet, we can construct the TUN packet.
         // The first 4 bytes need to be set to 0x0000 for the flags, and 0x0080 for IPv4.

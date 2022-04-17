@@ -248,7 +248,7 @@ async fn recv_tcp_send_udp(
                     println!("Sending to {}", addr);
                     //let writer = UdpSocket::connect(addr).await.unwrap();
                     let held_writer = writer.lock().await;
-                    held_writer.send_to(&buf[4..n], addr).await.unwrap();  // FIXME: thread 'tokio-runtime-worker' panicked at 'called `Result::unwrap()` on an `Err` value: Os { code: 22, kind: InvalidInput, message: "Invalid argument" }', src/public.rs:240:60
+                    held_writer.send_to(&buf[4..=n], addr).await.unwrap();
                 } else {
                     println!("That client is not in the database");
                 }
